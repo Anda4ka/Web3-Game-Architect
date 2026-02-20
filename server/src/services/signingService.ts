@@ -15,18 +15,18 @@ export class SigningService {
   }
 
   /**
-   * Signs a claim reward request for FrostToken.
+   * Signs a prize claim request for FrostDailyTournament.
    */
-  async signClaimReward(
+  async signPrizeClaim(
     chainId: number,
     contractAddress: string,
+    tournamentId: number,
     playerAddress: string,
-    amount: bigint,
-    runId: number
+    prizeAmount: bigint
   ): Promise<string> {
     const messageHash = ethers.solidityPackedKeccak256(
-      ['uint256', 'address', 'address', 'uint256', 'uint256'],
-      [chainId, contractAddress, playerAddress, amount, runId]
+      ['uint256', 'address', 'uint256', 'address', 'uint256'],
+      [chainId, contractAddress, tournamentId, playerAddress, prizeAmount]
     );
     
     return this.wallet.signMessage(ethers.getBytes(messageHash));

@@ -188,13 +188,13 @@ export class GameOverScene extends Phaser.Scene {
     const btnH = 45;
     const claimY = 515;
 
-    // 1. Claim $FROST Button
-    if (isConnected && this.data.crystals > 0) {
-      this.claimBtn = this.createWeb3Button(GAME_WIDTH / 2, claimY, `\u{1F48E} CLAIM ${this.data.crystals} $FROST`, btnW, btnH, 0x00d4ff, async () => {
+    // 1. Submit to Leaderboard Button
+    if (isConnected) {
+      this.claimBtn = this.createWeb3Button(GAME_WIDTH / 2, claimY, `\u{1F3C6} SUBMIT TO LEADERBOARD`, btnW, btnH, 0x00d4ff, async () => {
         await this.handleClaim();
       });
     } else if (!isConnected) {
-      this.add.text(GAME_WIDTH / 2, claimY, 'Connect wallet to claim $FROST rewards', {
+      this.add.text(GAME_WIDTH / 2, claimY, 'Connect wallet to enter tournaments', {
         fontSize: '12px',
         color: '#667788',
         fontStyle: 'italic'
@@ -243,7 +243,7 @@ export class GameOverScene extends Phaser.Scene {
 
   private async handleClaim(): Promise<void> {
     try {
-      this.showStatus('Validating run with backend...', '#ffffff');
+      this.showStatus('Submitting score to leaderboard...', '#ffffff');
       
       const logs = {
         score: this.data.score,
@@ -252,21 +252,21 @@ export class GameOverScene extends Phaser.Scene {
         telemetry: this.data.telemetry
       };
 
-      const txHash = await gameWeb3Service.submitRunAndClaim(this.runId, logs);
+      await gameWeb3Service.submitRun(logs);
       
-      this.showStatus('Claim successful! Tokens minted.', '#00ff88');
+      this.showStatus('Score submitted successfully!', '#00ff88');
       if (this.claimBtn) {
         const text = this.claimBtn.list[1] as Phaser.GameObjects.Text;
-        text.setText('\u2705 CLAIMED');
+        text.setText('\u2705 SUBMITTED');
         (this.claimBtn.list[0] as Phaser.GameObjects.Rectangle).setFillStyle(0x00ff88, 0.1).setStrokeStyle(2, 0x00ff88, 0.3);
       }
     } catch (err: any) {
       console.error(err);
-      this.showStatus(err.message || 'Claim failed', '#ff4444');
+      this.showStatus(err.message || 'Submission failed', '#ff4444');
       if (this.claimBtn) {
         const text = this.claimBtn.list[1] as Phaser.GameObjects.Text;
         const bg = this.claimBtn.list[0] as Phaser.GameObjects.Rectangle;
-        text.setText('RETRY CLAIM');
+        text.setText('RETRY SUBMIT');
         bg.setInteractive();
         bg.setAlpha(1);
       }

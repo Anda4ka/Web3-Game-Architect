@@ -5,8 +5,8 @@ import {
   FROST_TOKEN_ABI,
   SEASON_BADGE_ADDRESS,
   SEASON_BADGE_ABI,
-  TOURNAMENT_ADDRESS,
-  TOURNAMENT_ABI
+  DAILY_TOURNAMENT_ADDRESS,
+  DAILY_TOURNAMENT_ABI
 } from './contracts';
 
 export interface RunLogs {
@@ -17,40 +17,76 @@ export interface RunLogs {
 }
 
 export class GameWeb3Service {
-  private apiBaseUrl = 'http://localhost:3000'; // Adjust as needed
+  private apiBaseUrl = 'http://localhost:3000';
 
   /**
-   * Submits game logs to the backend and claims $FROST tokens on-chain.
+   * Submits game logs to the backend for leaderboard.
    */
-  public async submitRunAndClaim(runId: number, logs: RunLogs): Promise<string> {
+  public async submitRun(logs: RunLogs): Promise<void> {
     const address = walletManager.getAddress();
     if (!address) throw new Error('Wallet not connected');
 
-    // 1. Get signature from backend
     const response = await fetch(`${this.apiBaseUrl}/api/runs/submit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         walletAddress: address,
-        runId,
         runLogs: logs
       })
     });
 
     const data = await response.json();
     if (!data.success) {
-      throw new Error(data.error || 'Validation failed');
+      throw new Error(data.error || 'Submission failed');
     }
+  }
 
-    // 2. Call smart contract to claim reward
+  /**
+   * Enters the current daily tournament.
+   */
+  public async enterTournament(): Promise<string> {
     const signer = walletManager.getSigner();
     if (!signer) throw new Error('Signer not available');
 
-    const contract = new Contract(FROST_TOKEN_ADDRESS, FROST_TOKEN_ABI, signer);
+    const contract = new Contract(DAILY_TOURNAMENT_ADDRESS, DAILY_TOURNAMENT_ABI, signer);
+    const fee = await contract.entryFee();
     
-    const tx = await contract.claimReward(
-      data.amount,
-      data.runId,
+    const tx = await contract.enterTournament({ value: fee });
+    await tx.wait();
+    return tx.hash;
+  }
+
+  /**
+   * Claims the prize for a specific tournament.
+   */
+  public async claimTournamentPrize(tournamentId: number): Promise<string> {
+    const address = walletManager.getAddress();
+    if (!address) throw new Error('Wallet not connected');
+
+    // 1. Get signature and prize amount from backend
+    const response = await fetch(`${this.apiBaseUrl}/api/tournament/claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        walletAddress: address,
+        tournamentId
+      })
+    });
+
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error || 'No prize available or validation failed');
+    }
+
+    // 2. Call smart contract to claim
+    const signer = walletManager.getSigner();
+    if (!signer) throw new Error('Signer not available');
+
+    const contract = new Contract(DAILY_TOURNAMENT_ADDRESS, DAILY_TOURNAMENT_ABI, signer);
+    
+    const tx = await contract.claimPrize(
+      data.tournamentId,
+      data.prizeAmount,
       data.signature
     );
 
@@ -65,7 +101,6 @@ export class GameWeb3Service {
     const address = walletManager.getAddress();
     if (!address) throw new Error('Wallet not connected');
 
-    // 1. Get authorization from backend
     const response = await fetch(`${this.apiBaseUrl}/api/badges/authorize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -81,7 +116,6 @@ export class GameWeb3Service {
       throw new Error(data.error || 'Authorization failed');
     }
 
-    // 2. Call smart contract to mint
     const signer = walletManager.getSigner();
     if (!signer) throw new Error('Signer not available');
 

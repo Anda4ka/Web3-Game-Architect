@@ -26,17 +26,16 @@ fastify.get('/health', async () => {
   return { status: 'ok', signer: signingService.getAddress() };
 });
 
-// ─── Submit Run & Get Signature ────────────────────────────────────
+// ─── Submit Run (Leaderboard only) ───────────────────────────────────
 interface SubmitRunBody {
   walletAddress: string;
   runLogs: RunLogs;
-  runId: number;
 }
 
 fastify.post<{ Body: SubmitRunBody }>('/api/runs/submit', async (request, reply) => {
-  const { walletAddress, runLogs, runId } = request.body;
+  const { walletAddress, runLogs } = request.body;
 
-  if (!walletAddress || !runLogs || !runId) {
+  if (!walletAddress || !runLogs) {
     return reply.status(400).send({ error: 'Missing parameters' });
   }
 
@@ -46,46 +45,18 @@ fastify.post<{ Body: SubmitRunBody }>('/api/runs/submit', async (request, reply)
     return reply.status(403).send({ error: 'Validation failed', reason: validation.reason });
   }
 
-  // 2. [Optional] Store run in DB
-  // For MVP, we can skip DB persistence if we want, but it's better to have it.
-  /*
+  // 2. Store in DB for leaderboard
   try {
     const client = await fastify.pg.connect();
     await client.query(
-      'INSERT INTO runs (user_address, score, crystals, duration_ms, run_id) VALUES ($1, $2, $3, $4, $5)',
-      [walletAddress, runLogs.score, runLogs.crystals, runLogs.durationMs, runId]
+      'INSERT INTO runs (user_address, score, crystals, duration_ms) VALUES ($1, $2, $3, $4)',
+      [walletAddress, runLogs.score, runLogs.crystals, runLogs.durationMs]
     );
     client.release();
+    return { success: true };
   } catch (err) {
     fastify.log.error(err);
-  }
-  */
-
-  // 3. Generate Signature
-  try {
-    const chainId = parseInt(process.env.CHAIN_ID || '43113');
-    const contractAddress = process.env.FROST_TOKEN_ADDRESS || '';
-    
-    // Amount to mint: for MVP, 1 crystal = 1 $FROST (scaled to 18 decimals)
-    const amount = BigInt(runLogs.crystals) * BigInt(10**18);
-
-    const signature = await signingService.signClaimReward(
-      chainId,
-      contractAddress,
-      walletAddress,
-      amount,
-      runId
-    );
-
-    return {
-      success: true,
-      amount: amount.toString(),
-      runId,
-      signature
-    };
-  } catch (err) {
-    fastify.log.error(err);
-    return reply.status(500).send({ error: 'Signature generation failed' });
+    return reply.status(500).send({ error: 'Database error' });
   }
 });
 
@@ -115,34 +86,39 @@ fastify.post('/api/badges/authorize', async (request, reply) => {
   }
 });
 
-// ─── Tournament Match Resolution ───────────────────────────────────
-fastify.post('/api/tournament/resolve', async (request, reply) => {
-  const { matchId, score1, score2 } = request.body as any;
+// ─── Claim Tournament Prize ────────────────────────────────────────
+fastify.post('/api/tournament/claim', async (request, reply) => {
+  const { walletAddress, tournamentId } = request.body as any;
 
-  if (matchId === undefined || score1 === undefined || score2 === undefined) {
+  if (!walletAddress || tournamentId === undefined) {
     return reply.status(400).send({ error: 'Missing parameters' });
   }
 
+  // In production: check DB if user is a winner in this tournament
+  // For MVP: let's assume we fetch the prize amount for this user
+  const prizeAmountAVAX = "0.5"; // Example: fetched from DB/Leaderboard
+  const prizeAmountWei = ethers.parseEther(prizeAmountAVAX);
+
   try {
     const chainId = parseInt(process.env.CHAIN_ID || '43113');
-    const contractAddress = process.env.TOURNAMENT_ADDRESS || '';
+    const contractAddress = process.env.DAILY_TOURNAMENT_ADDRESS || '';
 
-    const signature = await signingService.signResolveMatch(
+    const signature = await signingService.signPrizeClaim(
       chainId,
       contractAddress,
-      matchId,
-      score1,
-      score2
+      tournamentId,
+      walletAddress,
+      prizeAmountWei
     );
 
     return {
       success: true,
-      matchId,
-      score1,
-      score2,
+      tournamentId,
+      prizeAmount: prizeAmountWei.toString(),
       signature
     };
   } catch (err) {
+    fastify.log.error(err);
     return reply.status(500).send({ error: 'Signature generation failed' });
   }
 });
