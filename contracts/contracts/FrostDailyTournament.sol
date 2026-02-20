@@ -24,6 +24,15 @@ contract FrostDailyTournament is Ownable, ReentrancyGuard {
     /// @notice Address of the backend server that signs prize claims
     address public backendSigner;
 
+    /// @notice Total funds available for prizes
+    uint256 public prizePool;
+    
+    /// @notice Accumulated protocol fees
+    uint256 public protocolFee;
+
+    /// @notice Protocol fee percentage (e.g. 10 = 10%)
+    uint256 public constant PROTOCOL_FEE_PERCENT = 10;
+
     /// @notice Mapping from tournamentId => player => isParticipating
     mapping(uint256 => mapping(address => bool)) public isRegistered;
 
@@ -35,6 +44,7 @@ contract FrostDailyTournament is Ownable, ReentrancyGuard {
     event PrizeClaimed(uint256 indexed tournamentId, address indexed player, uint256 amount);
     event BackendSignerUpdated(address indexed oldSigner, address indexed newSigner);
     event EntryFeeUpdated(uint256 oldFee, uint256 newFee);
+    event ProtocolFeeWithdrawn(address indexed owner, uint256 amount);
 
     /**
      * @param _backendSigner Address for ECDSA signature verification
@@ -55,6 +65,10 @@ contract FrostDailyTournament is Ownable, ReentrancyGuard {
         require(msg.value == entryFee, "Incorrect entry fee");
         require(!isRegistered[currentTournamentId][msg.sender], "Already registered");
 
+        uint256 fee = (msg.value * PROTOCOL_FEE_PERCENT) / 100;
+        protocolFee += fee;
+        prizePool += (msg.value - fee);
+
         isRegistered[currentTournamentId][msg.sender] = true;
 
         emit PlayerEntered(currentTournamentId, msg.sender, msg.value);
@@ -73,7 +87,10 @@ contract FrostDailyTournament is Ownable, ReentrancyGuard {
     ) external nonReentrant {
         require(isRegistered[tournamentId][msg.sender], "Not a participant");
         require(!hasClaimed[tournamentId][msg.sender], "Prize already claimed");
-        require(address(this).balance >= prizeAmount, "Insufficient contract balance");
+        require(prizeAmount <= prizePool, "Insufficient prize pool");
+        
+        // Sanity check to prevent draining by compromised backend
+        require(prizeAmount <= (prizePool * 80) / 100, "Prize exceeds sanity limit");
 
         // Verify signature: (chainId, contract, tournamentId, player, prizeAmount)
         bytes32 messageHash = keccak256(abi.encodePacked(
@@ -88,6 +105,7 @@ contract FrostDailyTournament is Ownable, ReentrancyGuard {
         require(ethSignedHash.recover(signature) == backendSigner, "Invalid signature");
 
         hasClaimed[tournamentId][msg.sender] = true;
+        prizePool -= prizeAmount;
 
         (bool success, ) = payable(msg.sender).call{value: prizeAmount}("");
         require(success, "Transfer failed");
@@ -126,10 +144,14 @@ contract FrostDailyTournament is Ownable, ReentrancyGuard {
      * @notice Withdraw excess funds or fees from the contract. Only owner.
      */
     function withdraw(uint256 amount) external onlyOwner {
-        require(address(this).balance >= amount, "Insufficient balance");
+        require(amount <= protocolFee, "Amount exceeds protocol fee");
+        protocolFee -= amount;
         (bool success, ) = payable(owner()).call{value: amount}("");
         require(success, "Withdraw failed");
+        emit ProtocolFeeWithdrawn(owner(), amount);
     }
 
-    receive() external payable {}
+    receive() external payable {
+        prizePool += msg.value;
+    }
 }

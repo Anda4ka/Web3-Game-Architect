@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";
 
 /**
  * @title SeasonBadge
@@ -26,6 +27,14 @@ contract SeasonBadge is ERC721, Ownable {
 
     /// @notice Maps seasonId to its metadata URI (IPFS)
     mapping(uint256 => string) public seasonURI;
+
+    /// @notice Base URI for tokens without specific season URI
+    string public baseURI;
+
+    /// @notice Returns the total number of badges minted
+    function totalSupply() public view returns (uint256) {
+        return _tokenIdCounter;
+    }
 
     /// @notice Maps tokenId to its seasonId (for tokenURI lookup)
     mapping(uint256 => uint256) public tokenSeason;
@@ -99,7 +108,15 @@ contract SeasonBadge is ERC721, Ownable {
         }
 
         // Fallback: return base URI + tokenId if no season URI set
-        return super.tokenURI(tokenId);
+        return bytes(baseURI).length > 0 ? string(abi.encodePacked(baseURI, Strings.toString(tokenId))) : "";
+    }
+
+    /**
+     * @notice Set the base URI for fallback tokens. Only callable by contract owner.
+     * @param uri The IPFS or HTTP URI for the base URI
+     */
+    function setBaseURI(string calldata uri) external onlyOwner {
+        baseURI = uri;
     }
 
     /**
