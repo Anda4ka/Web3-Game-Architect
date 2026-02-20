@@ -17,7 +17,14 @@ export interface RunLogs {
 }
 
 export class GameWeb3Service {
-  private apiBaseUrl = 'http://localhost:3000';
+  private get apiBaseUrl(): string {
+    return import.meta.env.VITE_API_URL || 'http://localhost:3000';
+  }
+
+  private get contractAddress(): string {
+    // In production, enforce existence, fallback to constant otherwise
+    return import.meta.env.VITE_CONTRACT_ADDRESS || DAILY_TOURNAMENT_ADDRESS;
+  }
 
   /**
    * Submits game logs to the backend for leaderboard.
@@ -50,48 +57,81 @@ export class GameWeb3Service {
 
     const contract = new Contract(DAILY_TOURNAMENT_ADDRESS, DAILY_TOURNAMENT_ABI, signer);
     const fee = await contract.entryFee();
-    
+
     const tx = await contract.enterTournament({ value: fee });
     await tx.wait();
     return tx.hash;
   }
 
   /**
-   * Claims the prize for a specific tournament.
+   * 1. Requests the signature from the backend for a specific score and session.
    */
-  public async claimTournamentPrize(tournamentId: number): Promise<string> {
-    const address = walletManager.getAddress();
-    if (!address) throw new Error('Wallet not connected');
+  public async requestClaimSignature(
+    walletAddress: string,
+    sessionId: string,
+    tournamentId: number,
+    score: number
+  ): Promise<{ signature: string; amount: string; tournamentId: number }> {
+    try {
+      const response = await fetch(`${this.apiBaseUrl}/api/claim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          walletAddress,
+          sessionId,
+          tournamentId,
+          score
+        })
+      });
 
-    // 1. Get signature and prize amount from backend
-    const response = await fetch(`${this.apiBaseUrl}/api/tournament/claim`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        walletAddress: address,
-        tournamentId
-      })
-    });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Server rejected claim request');
+      }
 
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.error || 'No prize available or validation failed');
+      return {
+        signature: data.signature,
+        amount: data.amount,
+        tournamentId: data.tournamentId
+      };
+    } catch (error: any) {
+      console.error('requestClaimSignature error:', error);
+      throw new Error(`Failed to request signature: ${error?.message || 'Unknown error'}`);
     }
+  }
 
-    // 2. Call smart contract to claim
-    const signer = walletManager.getSigner();
-    if (!signer) throw new Error('Signer not available');
+  /**
+   * 2. Executes the smart contract transaction using the backend's signature.
+   */
+  public async executeClaimTransaction(
+    tournamentId: number,
+    prizeAmount: string,
+    signature: string
+  ): Promise<string> {
+    try {
+      const signer = walletManager.getSigner();
+      if (!signer) throw new Error('Signer not available (wallet disconnected?)');
 
-    const contract = new Contract(DAILY_TOURNAMENT_ADDRESS, DAILY_TOURNAMENT_ABI, signer);
-    
-    const tx = await contract.claimPrize(
-      data.tournamentId,
-      data.prizeAmount,
-      data.signature
-    );
+      // Use dynamic contract address if set
+      const addressToUse = this.contractAddress;
+      const contract = new Contract(addressToUse, DAILY_TOURNAMENT_ABI, signer);
 
-    await tx.wait();
-    return tx.hash;
+      const tx = await contract.claimPrize(
+        tournamentId,
+        prizeAmount,
+        signature
+      );
+
+      await tx.wait();
+      return tx.hash;
+    } catch (error: any) {
+      console.error('executeClaimTransaction error:', error);
+      // Try to extract user rejection error specifically (e.g. MetaMask "User denied transaction")
+      if (error?.code === 'ACTION_REJECTED' || error?.message?.includes('user rejected')) {
+        throw new Error('Transaction was cancelled by the user.');
+      }
+      throw new Error(`Claim transaction failed: ${error?.reason || error?.message || 'Unknown error'}`);
+    }
   }
 
   /**
@@ -120,7 +160,7 @@ export class GameWeb3Service {
     if (!signer) throw new Error('Signer not available');
 
     const contract = new Contract(SEASON_BADGE_ADDRESS, SEASON_BADGE_ABI, signer);
-    
+
     const tx = await contract.mintBadge(seasonId, data.signature);
     await tx.wait();
     return tx.hash;
