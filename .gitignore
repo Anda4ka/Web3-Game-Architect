@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+.npm/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# Build Artifacts
+dist/
+build/
+artifacts/
+cache/
+typechain-types/
+out/
+tsc_output.txt
+
+# IDE / System files
+.vscode/
+.idea/
+.DS_Store
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Hardhat / Solidity
+contracts/artifacts/
+contracts/cache/
+contracts/typechain-types/
+
+# Temporary files
+.gemini/
+tmp/
